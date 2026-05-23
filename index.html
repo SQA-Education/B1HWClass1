@@ -14,7 +14,7 @@ body{font-family:'Segoe UI',sans-serif;background:#5B5091;min-height:100vh;paddi
 .card{background:#fff;border-radius:16px;padding:25px;margin-bottom:20px}
 .card h2{color:#5B5091;margin-bottom:15px}
 label{font-weight:600;color:#333;display:block;margin-bottom:8px}
-input[type="text"]{width:100%;padding:14px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;margin-bottom:15px}
+input[type="text"],select{width:100%;padding:14px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;margin-bottom:15px}
 .btn{background:#5B5091;color:#fff;border:none;padding:14px 32px;border-radius:12px;font-size:16px;font-weight:600;cursor:pointer;width:100%;margin-top:10px}
 .btn:hover{background:#4a4080}
 .btn-orange{background:#F5A623}
@@ -75,14 +75,9 @@ audio{width:100%;margin-top:15px}
 <div class="card">
 <label>Your Full Name</label>
 <input type="text" id="studentName" placeholder="Enter your name...">
-<label>Your Teacher</label>
-<select id="teacherName" style="width:100%;padding:14px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;margin-bottom:15px" onchange="updateClasses()">
-  <option value="">Select your teacher...</option>
-  <option value="Laura Ebel">Laura Ebel</option>
-  <option value="Jonelle Williams">Jonelle Williams</option>
-</select>
+<input type="hidden" id="teacherName" value="">
 <label>Your Class</label>
-<select id="className" style="width:100%;padding:14px;border:2px solid #e0e0e0;border-radius:12px;font-size:16px;margin-bottom:15px">
+<select id="className" onchange="setTeacher(this)">
 <option value="">-- Select your class --</option>
 <optgroup label="Laura Ebel">
 <option value="3088" data-teacher="Laura Ebel">3088 - Mon/Wed 9:00 AM (Laura)</option>
@@ -188,10 +183,8 @@ Use <strong>Past Simple tense</strong>.
 <div><label>Speaking</label><span id="scS">0/20</span></div>
 <div><label>Grammar</label><span id="scG">0/8</span></div>
 </div>
-<button class="btn btn-orange" style="margin-top:25px" onclick="submitToTeacher()">Submit to Teacher →</button>
-</div>
-<div style="text-align:center;margin-top:20px">
-<button class="btn" style="background:#fff;color:#5B5091" onclick="location.reload()">Try Again</button>
+<button class="btn btn-orange" style="margin-top:25px" id="submitBtn" onclick="submitToTeacher()">Submit to Teacher →</button>
+<div id="submitStatus" style="display:none;margin-top:16px;background:rgba(255,255,255,.2);border-radius:12px;padding:16px;text-align:center"></div>
 </div>
 </div>
 </div>
@@ -201,6 +194,7 @@ const SESSION='1';
 let name='',scores={l:0,v:0,w:0,s:0,g:0},writingText='';
 let selectedWord=null,isRec=false,recTime=0,recTimer=null,speakingTranscript='';
 let readingAnswers=[],grammarAnswers=[];
+let submitted=false;
 
 // Question banks
 const readingQBank=[
@@ -281,32 +275,16 @@ function initQuestions(){
   document.getElementById('grammarQuestions').innerHTML=gHTML;
 }
 
-const TEACHER_CLASSES = {
-  'Laura Ebel': [
-    {value:'3088', label:'Mon/Wed 9:00 AM - 10:30 AM'},
-    {value:'3090', label:'Mon/Wed 6:30 PM - 8:00 PM'},
-    {value:'3095', label:'Tue/Thu 11:00 AM - 12:30 PM'},
-  ],
-  'Jonelle Williams': [
-    {value:'3098', label:'Tue/Thu 6:30 PM - 8:00 PM'},
-    {value:'3101', label:'Tue/Thu 8:30 PM - 10:00 PM'},
-  ],
-};
-function updateClasses(){
-  const teacher = document.getElementById('teacherName').value;
-  const sel = document.getElementById('className');
-  sel.innerHTML = '<option value="">Select your class...</option>';
-  (TEACHER_CLASSES[teacher] || []).forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c.value; opt.textContent = c.label;
-    sel.appendChild(opt);
-  });
+function setTeacher(sel){
+  var opt=sel.options[sel.selectedIndex];
+  document.getElementById('teacherName').value=opt?(opt.getAttribute('data-teacher')||''):'';
 }
+
 function startQuiz(){
   name=document.getElementById('studentName').value.trim();
   if(!name){alert('Please enter your name');return;}
-  if(!document.getElementById('teacherName').value){alert('Please select your teacher');return;}
   if(!document.getElementById('className').value){alert('Please select your class');return;}
+  setTeacher(document.getElementById('className'));
   initQuestions();
   showSection('s1');
 }
@@ -388,11 +366,15 @@ function startRec(){
   // Use speech recognition only — no simultaneous MediaRecorder (causes conflict on Android)
   recognition = new SR();
   recognition.continuous = false;
-  recognition.interimResults = false;
+  recognition.interimResults = true;
   recognition.lang = 'en-US';
   recognition.onresult = function(e){
-    speakingTranscript += e.results[0][0].transcript + ' ';
-    document.getElementById('transcript').textContent = speakingTranscript.trim();
+    var interim='';
+    for(var i=e.resultIndex;i<e.results.length;i++){
+      if(e.results[i].isFinal)speakingTranscript += e.results[i][0].transcript + ' ';
+      else interim += e.results[i][0].transcript;
+    }
+    document.getElementById('transcript').textContent = (speakingTranscript+interim).trim() || 'Listening...';
   };
   recognition.onerror = function(){};
   recognition.onend = function(){
@@ -453,19 +435,34 @@ function submitFinal(){
   showSection('results');
 }
 function submitToTeacher(){
-  const pct=Math.round((scores.l+scores.v+scores.w+scores.s+scores.g)/57*100);
-  const url='https://docs.google.com/forms/d/e/1FAIpQLSf9uEs5MqWLveyoaMBxeWx3pW1b90siwgaom766CpwqnOI7Dg/viewform?usp=pp_url'+
-    '&entry.518151516='+encodeURIComponent(name)+
-    '&entry.864654596='+encodeURIComponent(SESSION)+
-    '&entry.258952242='+encodeURIComponent(scores.l+'/3')+
-    '&entry.859150584='+encodeURIComponent(scores.v+'/6')+
-    '&entry.1121796741='+encodeURIComponent(scores.w+'/20')+
-    '&entry.1435469716='+encodeURIComponent(scores.s+'/20')+
-    '&entry.1998281944='+encodeURIComponent(scores.g+'/8')+
-    '&entry.1207114914='+encodeURIComponent(pct+'%')+
-    '&entry.939912807='+encodeURIComponent(writingText)+
-    '&entry.2086302086='+encodeURIComponent(speakingTranscript || 'No transcript captured');
-  const finalUrl=url+'&entry.710610284='+encodeURIComponent(document.getElementById('className').value)+'&entry.speakTranscript='+encodeURIComponent(speakingTranscript||document.getElementById('transcript').textContent.trim()||'No transcript captured');window.open(finalUrl,'_blank');
+  if(submitted)return;
+  submitted=true;
+  var btn=document.getElementById('submitBtn');
+  if(btn){btn.disabled=true;btn.textContent='Submitting...';}
+  var pct=Math.round((scores.l+scores.v+scores.w+scores.s+scores.g)/57*100);
+  var formData=new FormData();
+  formData.append('entry.518151516',name);
+  formData.append('entry.710610284',document.getElementById('className').value);
+  formData.append('entry.864654596',SESSION);
+  formData.append('entry.258952242',scores.l+'/3');
+  formData.append('entry.859150584',scores.v+'/6');
+  formData.append('entry.1121796741',scores.w+'/20');
+  formData.append('entry.1435469716',scores.s+'/20');
+  formData.append('entry.1998281944',scores.g+'/8');
+  formData.append('entry.1207114914',pct+'%');
+  formData.append('entry.939912807',writingText||'');
+  formData.append('entry.2086302086',speakingTranscript||'No transcript captured');
+  fetch('https://docs.google.com/forms/d/e/1FAIpQLSf9uEs5MqWLveyoaMBxeWx3pW1b90siwgaom766CpwqnOI7Dg/formResponse',{method:'POST',mode:'no-cors',body:formData})
+  .then(function(){
+    if(btn){btn.textContent='Submitted!';btn.style.background='#22c55e';}
+    var s=document.getElementById('submitStatus');
+    if(s){s.textContent='Homework submitted! Your teacher received your work.';s.style.display='block';}
+  }).catch(function(){
+    submitted=false;
+    if(btn){btn.disabled=false;btn.textContent='Failed - Tap to Retry';btn.style.background='#ef4444';}
+    var s=document.getElementById('submitStatus');
+    if(s){s.textContent='Submission failed. Check your internet and try again.';s.style.display='block';}
+  });
 }
 </script>
 </body>
